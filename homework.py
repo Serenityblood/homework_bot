@@ -175,6 +175,13 @@ def main():
                     prev_report = current_report.copy()
 
             current_timestamp = response['current_date']
+        except EmptyAPIResponseError as error:
+            message = f'Сбой в работе программы: {error}'
+            current_report['message'] = message
+            if current_report != prev_report:
+                send_message(bot, message)
+                prev_report = current_report.copy()
+                logger.error(f'Сбой {error}')
 
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
@@ -182,7 +189,7 @@ def main():
             if current_report != prev_report:
                 send_message(bot, message)
                 prev_report = current_report.copy()
-                logger.error(f'Сбой {error}')
+                logger.error(f'Сбой {error}', exc_info=True)
         finally:
             time.sleep(RETRY_TIME)
 
