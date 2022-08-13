@@ -1,9 +1,9 @@
 import logging
-from logging.handlers import RotatingFileHandler
 import os
 import sys
 import time
 from http import HTTPStatus
+from logging.handlers import RotatingFileHandler
 
 import requests
 import telegram
@@ -13,12 +13,13 @@ from exceptions import EmptyAPIResponseError, WorngStatusCodeError
 
 load_dotenv()
 
-BASE_DIR = os.path.dirname(__file__)
-log_file = os.path.join(BASE_DIR, 'logs.log')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler(stream=sys.stdout)
-file_handler = RotatingFileHandler(log_file, maxBytes=5000000, backupCount=5)
+file_handler = RotatingFileHandler(
+    f'{BASE_DIR}/logs.log', maxBytes=5000000, backupCount=5
+)
 formatter = logging.Formatter(
     '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s - %(message)s'
 )
@@ -60,54 +61,45 @@ def send_message(bot, message):
 def get_api_answer(current_timestamp):
     """Получает ответ от API и переводит в данные Python."""
     timestamp = current_timestamp
-    params = {
+    params = {'from_date': timestamp}
+    request_data = {
         'url': ENDPOINT,
         'headers': HEADERS,
-        'from_date': timestamp
+        'params': params
     }
-    logger.error(
+
+    logger.info(
         'Запрос к API. URL={url}, headers={headers}, '
-        'from_date={from_date}'.format(
-            url=params['url'],
-            headers=params['headers'],
-            from_date=params['from_date']
-        )
+        'from_date={params}'.format(**request_data)
     )
     try:
-        response = requests.get(
-            params['url'],
-            headers=params['headers'],
-            params=params
-        )
+        response = requests.get(**request_data)
         if response.status_code != HTTPStatus.OK:
             raise WorngStatusCodeError(f'Статус: {response.status_code}')
         return response.json()
-    except ConnectionError:
+    except Exception:
         logger.error(
             'Запрос к API не удался. URL={url}, headers={headers}, '
-            'from_date={from_date}'.format(
-                url=params['url'],
-                headers=params['headers'],
-                from_date=params['from_date']
-            )
+            'from_date={params}'.format(**request_data)
         )
+        raise ConnectionError
 
 
 def check_response(response):
     """Проверяет корректность ответа API."""
     logger.info('Начало проверки response')
     key_list = ('current_date', 'homeworks')
-    if type(response) != dict:
+    if not isinstance(response, dict):
         raise TypeError('response - не словарь!')
     for key in key_list:
         if key in response:
-            logger.error(f'Ключ {key} есть')
+            logger.info(f'Ключ {key} есть')
         else:
             raise EmptyAPIResponseError(f' Нет ключа {key}')
-    homeworks = response['homeworks']
+    homeworks = response.get('homeworks')
     if not isinstance(homeworks, list):
         raise KeyError('Домашка не список!')
-    logger.error('Проверка пройдена')
+    logger.info('Проверка пройдена')
     return homeworks
 
 
@@ -142,7 +134,7 @@ def check_tokens():
             logging.critical(f'Токена {token} {name} нет')
             return False
         else:
-            logging.critical('Токены есть')
+            logging.info('Токены есть')
             return True
 
 
@@ -159,22 +151,23 @@ def main():
             response = get_api_answer(current_timestamp)
             homeworks = check_response(response)
             if homeworks:
-                status_message = parse_status(homeworks[0])
-                current_report['message'] = status_message
-                current_report['name'] = homeworks[0].get('homework_name')
-                if current_report != prev_report:
-                    logging.info('Есть обновления')
-                    send_message(bot, status_message)
-                    prev_report = current_report.copy()
-            else:
-                message = 'Обновлений нет'
+                homework = homeworks[0]
+                message = parse_status(homework)
                 current_report['message'] = message
-                if current_report != prev_report:
-                    logging.info('Обновлений нет')
-                    send_message(bot, message)
-                    prev_report = current_report.copy()
+                current_report['name'] = homework.get('homework_name')
+            else:
+                message = 'Обновлений нет!'
+                current_report['message'] = message
+            if current_report != prev_report:
+                logging.info('Есть обновления')
+                send_message(bot, message)
+                current_timestamp = (
+                    response.get('current_date') or int(time.time())
+                )
+                prev_report = current_report.copy()
+            else:
+                logging.info('Новых сообщений нет!')
 
-            current_timestamp = response['current_date']
         except EmptyAPIResponseError:
             logger.error('Пустой ответ API')
 
