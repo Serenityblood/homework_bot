@@ -75,14 +75,18 @@ def get_api_answer(current_timestamp):
     try:
         response = requests.get(**request_data)
         if response.status_code != HTTPStatus.OK:
-            raise WorngStatusCodeError(f'Статус: {response.status_code}')
+            raise WorngStatusCodeError(
+                f'Статус: {response.status_code}'
+                f'Причина: {response.reason}'
+                f'Текст: {response.text}'
+            )
         return response.json()
-    except Exception:
-        logger.error(
+    except Exception as error:
+        raise ConnectionError(
+            f'Сбой: {error}'
             'Запрос к API не удался. URL={url}, headers={headers}, '
             'from_date={params}'.format(**request_data)
         )
-        raise ConnectionError
 
 
 def check_response(response):
@@ -129,13 +133,14 @@ def check_tokens():
         ('TELEGRAM_TOKEN', TELEGRAM_TOKEN),
         ('TELGRAM_CHAT_ID', TELEGRAM_CHAT_ID)
     )
+    tokens_exist = True
     for name, token in token_tuple:
         if not token:
             logging.critical(f'Токена {token} {name} нет')
-            return False
+            tokens_exist = False
         else:
             logging.info('Токены есть')
-            return True
+    return tokens_exist
 
 
 def main():
@@ -168,8 +173,13 @@ def main():
             else:
                 logging.info('Новых сообщений нет!')
 
-        except EmptyAPIResponseError:
-            logger.error('Пустой ответ API')
+        except EmptyAPIResponseError as error:
+            message = f'Пустой ответ API. {error}'
+            current_report['message'] = message
+            if current_report != prev_report:
+                send_message(bot, message)
+                prev_report = current_report.copy()
+                logger.error(f'Сбой: {error}', exc_info=True)
 
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
@@ -177,7 +187,7 @@ def main():
             if current_report != prev_report:
                 send_message(bot, message)
                 prev_report = current_report.copy()
-                logger.error(f'Сбой {error}', exc_info=True)
+                logger.error(f'Сбой: {error}', exc_info=True)
         finally:
             time.sleep(RETRY_TIME)
 
